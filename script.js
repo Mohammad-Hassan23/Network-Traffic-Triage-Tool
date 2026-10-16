@@ -2819,16 +2819,6 @@ const SAMPLE_LABELS = {
   "mixed-soc-lab.csv": "Mixed SOC lab"
 };
 
-  /* @@NEXT@@ */
-
-
-
-
-
-
-
-
-
   /* ===========================================================================
    * PUBLIC SURFACE
    *

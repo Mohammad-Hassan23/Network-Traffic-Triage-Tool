@@ -1,0 +1,19 @@
+# Editor and operating-system clutter that should never be committed.
+# The project itself is plain HTML, CSS and JavaScript: there is nothing to build.
+
+# Cline / agent working directory (if you use one)
+.cline-home/
+
+# Windows
+Thumbs.db
+desktop.ini
+*.lnk
+
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
