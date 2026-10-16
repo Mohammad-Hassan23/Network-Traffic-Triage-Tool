@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Network Traffic Triage Tool - Wireshark CSV analyser (runs in your browser)</title>
+<meta name="description" content="Educational, offline network traffic triage tool. Upload a Wireshark CSV export and get an explainable report of activity worth investigating. All analysis happens locally in your browser.">
+<meta name="color-scheme" content="dark">
+<link rel="stylesheet" href="styles.css">
+<script src="script.js" defer></script>
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">NTT</span>
+      <div class="brand-text">
+        <h1>Network Traffic Triage Tool</h1>
+        <p class="tagline">Learn to triage network traffic like a SOC analyst &mdash; locally, privately, in your browser.</p>
+      </div>
+    </div>
+    <p class="disclaimer">
+      <strong>Educational network triage tool.</strong> Alerts indicate activity worth investigating and do
+      <em>not</em> prove malicious behaviour. Only analyse traffic from systems and networks you own or are
+      authorised to monitor.
+    </p>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+
+  <!-- ============================= PRIVACY ============================= -->
+  <section class="privacy" aria-labelledby="privacy-heading">
+    <h2 id="privacy-heading" class="panel-title"><span class="dot dot-ok" aria-hidden="true"></span>Privacy</h2>
+    <p class="privacy-lead">
+      <strong>Your packet capture data is analysed locally in your browser and is not uploaded anywhere.</strong>
+    </p>
+    <p>
+      This page has no analytics, no cookies, no tracking, no advertising, no telemetry and no external
+      requests of any kind. The CSV you select is read into this tab's memory, analysed by JavaScript that
+      runs on your own machine, and discarded when you close or refresh the page. There is no server, no
+      database and no API behind this tool. You can confirm all of this yourself: open your browser's
+      developer tools, switch to the <em>Network</em> tab, and load a capture. You will see this page's own
+      files and nothing else.
+    </p>
+  </section>
+
+  <!-- ============================= 1. LOAD ============================= -->
+  <section id="load-section" class="card" aria-labelledby="load-heading">
+    <h2 id="load-heading"><span class="step">1</span>Load a packet capture</h2>
+    <p class="section-intro">
+      Export the Wireshark packet list as CSV, then drop it here. Version 1 works with
+      <strong>CSV exports only</strong> &mdash; raw <code>.pcap</code> and <code>.pcapng</code> files are not
+      parsed yet (see <a href="#limitations">Limitations</a>).
+    </p>
+
+    <div class="load-grid">
+
+      <div class="dropzone" id="dropzone">
+        <p class="dropzone-title" id="dropzone-title">Upload Wireshark CSV</p>
+        <p class="dropzone-help" id="dropzone-help">
+          Drag and drop your CSV file here, or choose it with the file picker.
+        </p>
+        <div class="dropzone-actions">
+          <label class="field-label" for="file-input">CSV file</label>
+          <input type="file" id="file-input" accept=".csv,.txt,text/csv,text/plain"
+                 aria-describedby="dropzone-help dropzone-limit">
+          <button type="button" class="btn btn-quiet" id="clear-btn" hidden>Clear loaded capture</button>
+        </div>
+        <p class="hint" id="dropzone-limit">
+          Maximum size 30&nbsp;MB / 300,000 packets. Accepted file types: <code>.csv</code> and <code>.txt</code>.
+          Nothing is uploaded &mdash; the file is read and analysed inside this tab.
+        </p>
+      </div>
+
+      <div class="demo-panel">
+        <h3>Demo data <span class="badge badge-demo" id="demo-badge" hidden>Demo Data</span></h3>
+        <p class="hint">
+          Fictional captures stored inside this page, so you can demonstrate the tool without a file. They use
+          private and documentation IP ranges only.
+        </p>
+        <div class="demo-buttons">
+          <button type="button" class="btn" data-sample="normal-traffic.csv">Load Normal Sample</button>
+          <button type="button" class="btn" data-sample="high-volume-traffic.csv">Load Suspicious Sample</button>
+          <button type="button" class="btn" data-sample="mixed-soc-lab.csv">Load Mixed SOC Lab</button>
+        </div>
+        <p class="hint">Loading demo data replaces any file you have already loaded.</p>
+      </div>
+
+    </div>
+
+    <div id="status" class="status" role="status" aria-live="polite">
+      <span class="status-idle">No capture loaded yet. Upload a CSV or pick a demo capture.</span>
+    </div>
+
+    <div id="parse-summary" class="parse-summary" hidden></div>
+  </section>
+
+  <!-- ============================= 2. THRESHOLDS ============================= -->
+  <section id="settings" class="card" aria-labelledby="settings-heading">
+    <h2 id="settings-heading"><span class="step">2</span>Detection thresholds</h2>
+    <p class="section-intro">
+      These numbers decide when an observation becomes a finding. They are <strong>educational defaults, not
+      universal security thresholds</strong>. Change them and the report below updates instantly.
+    </p>
+    <p class="callout">
+      Thresholds should be adjusted based on the environment. A busy server may legitimately generate thousands
+      of packets, while the same activity from another endpoint might deserve investigation.
+    </p>
+
+    <form id="thresholds-form" class="threshold-grid" autocomplete="off">
+      <div class="field">
+        <label for="t-packets">Packets per source</label>
+        <input type="number" id="t-packets" name="packetsPerSource" min="1" step="1" value="50" inputmode="numeric">
+        <p class="field-hint">Rule 1 &mdash; high packet volume</p>
+      </div>
+      <div class="field">
+        <label for="t-dests">Unique destinations</label>
+        <input type="number" id="t-dests" name="uniqueDestinations" min="1" step="1" value="10" inputmode="numeric">
+        <p class="field-hint">Rule 2 &mdash; possible host scanning</p>
+      </div>
+      <div class="field">
+        <label for="t-ports">Unique ports</label>
+        <input type="number" id="t-ports" name="uniquePorts" min="1" step="1" value="10" inputmode="numeric">
+        <p class="field-hint">Rule 3 &mdash; possible port scanning</p>
+      </div>
+      <div class="field">
+        <label for="t-icmp">ICMP packets</label>
+        <input type="number" id="t-icmp" name="icmpPackets" min="1" step="1" value="30" inputmode="numeric">
+        <p class="field-hint">Rule 4 &mdash; high ICMP activity</p>
+      </div>
+      <div class="field">
+        <label for="t-dns">DNS packets</label>
+        <input type="number" id="t-dns" name="dnsPackets" min="1" step="1" value="30" inputmode="numeric">
+        <p class="field-hint">Rule 5 &mdash; high DNS activity</p>
+      </div>
+      <div class="field">
+        <label for="t-pairs">Repeated source&nbsp;&rarr;&nbsp;destination packets</label>
+        <input type="number" id="t-pairs" name="pairPackets" min="1" step="1" value="40" inputmode="numeric">
+        <p class="field-hint">Rule 6 &mdash; repeated communication</p>
+      </div>
+      <div class="field">
+        <label for="t-syn">TCP SYN packets</label>
+        <input type="number" id="t-syn" name="synPackets" min="1" step="1" value="30" inputmode="numeric">
+        <p class="field-hint">Rule 7 &mdash; SYN-heavy activity</p>
+      </div>
+      <div class="field field-actions">
+        <button type="button" class="btn" id="reset-thresholds">Reset Defaults</button>
+        <p class="field-hint">Restores the seven values above.</p>
+      </div>
+    </form>
+    <p class="hint">
+      A source has to exceed the value to produce a finding (for example 51 packets against a threshold of 50).
+    </p>
+  </section>
+
+  <!-- ============================= 3. OVERVIEW ============================= -->
+  <section id="overview" class="card" aria-labelledby="overview-heading">
+    <div class="section-head">
+      <h2 id="overview-heading"><span class="step">3</span>Traffic overview</h2>
+      <span class="badge badge-demo" id="demo-badge-overview" hidden>Demo Data</span>
+    </div>
+    <div id="overview-empty" class="placeholder">
+      Load a capture to see the network overview.
+    </div>
+
+    <div id="overview-content" hidden>
+      <dl class="summary-cards" id="summary-cards"></dl>
+
+      <div class="score-panel" id="score-panel">
+        <h3>Investigation score</h3>
+        <p class="hint">
+          This is a tally of what the rules found, weighted by how far each observation exceeded its threshold.
+          It is <strong>not</strong> a probability and it does <strong>not</strong> mean "X% malicious". A score of
+          50 does not mean a 50% chance of compromise; it means the findings listed below deserve attention.
+        </p>
+        <div class="score-body">
+          <div class="score-figure">
+            <span class="score-number" id="score-number">0</span>
+            <span class="score-label" id="score-label">No findings</span>
+          </div>
+          <ul class="score-breakdown" id="score-breakdown"></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================= 4. ACTIVITY ============================= -->
+  <section id="activity" class="card" aria-labelledby="activity-heading">
+    <h2 id="activity-heading"><span class="step">4</span>Who talked, and about what</h2>
+
+    <div class="activity-grid">
+      <div class="activity-block">
+        <h3>Protocol distribution</h3>
+        <p class="hint">Only protocols that actually appear in this capture are shown.</p>
+        <div id="protocol-chart" class="chart" role="list" aria-label="Protocol distribution"></div>
+      </div>
+
+      <div class="activity-block">
+        <h3>Top source hosts</h3>
+        <p class="hint">Top 10 hosts ranked by packets sent. Bars are scaled to the busiest host.</p>
+        <div id="top-sources" class="table-wrap"></div>
+      </div>
+
+      <div class="activity-block">
+        <h3>Top destinations</h3>
+        <p class="hint">Top 10 destination addresses ranked by packets received.</p>
+        <div id="top-destinations" class="table-wrap"></div>
+      </div>
+
+      <div class="activity-block">
+        <h3>Busiest conversations</h3>
+        <p class="hint">
+          Top 10 source&nbsp;&rarr;&nbsp;destination pairs. This is the view that makes repeated
+          source-to-destination traffic (Rule 6) easy to see.
+        </p>
+        <div id="top-pairs" class="table-wrap"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================= 5. FINDINGS ============================= -->
+  <section id="findings-section" class="card" aria-labelledby="findings-heading">
+    <h2 id="findings-heading"><span class="step">5</span>Findings worth investigating</h2>
+    <p class="section-intro">
+      Every item below is <strong>activity worth a look</strong>, not a verdict. Each finding shows the evidence,
+      the threshold it crossed, why it might matter, innocent explanations, and what to check next.
+    </p>
+
+    <div class="filters" id="filters">
+      <h3 class="filters-heading">Filter and search</h3>
+      <div class="filter-grid">
+        <div class="field">
+          <label for="filter-source">Source host</label>
+          <select id="filter-source"><option value="">All sources</option></select>
+        </div>
+        <div class="field">
+          <label for="filter-destination">Destination host</label>
+          <select id="filter-destination"><option value="">All destinations</option></select>
+        </div>
+        <div class="field">
+          <label for="filter-protocol">Protocol</label>
+          <select id="filter-protocol"><option value="">All protocols</option></select>
+        </div>
+        <div class="field">
+          <label for="filter-severity">Alert severity</label>
+          <select id="filter-severity">
+            <option value="">All severities</option>
+            <option value="Informational">Informational</option>
+            <option value="Low">Low</option>
+            <option value="Medium">Medium</option>
+            <option value="High">High</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="filter-search">Search text</label>
+          <input type="search" id="filter-search" placeholder="host, port, rule name&hellip;"
+                 aria-describedby="filter-search-hint">
+          <p class="field-hint" id="filter-search-hint">Searches findings and the packet list.</p>
+        </div>
+        <div class="field field-actions">
+          <button type="button" class="btn" id="clear-filters">Clear filters</button>
+        </div>
+      </div>
+      <p class="filter-status" id="filter-status" role="status" aria-live="polite">No capture loaded.</p>
+    </div>
+
+    <div id="findings" class="findings" aria-live="polite"></div>
+    <div id="rule-coverage" class="rule-coverage"></div>
+  </section>
+
+  <!-- ============================= 6. PACKETS ============================= -->
+  <section id="packets-section" class="card" aria-labelledby="packets-heading">
+    <h2 id="packets-heading"><span class="step">6</span>Packet view</h2>
+    <p class="hint">
+      Raw rows from your capture, so you can check the tool's working. The table shows at most the first
+      200 matching packets to keep the page responsive.
+    </p>
+    <div id="packet-count" class="hint"></div>
+    <div id="packet-table" class="table-wrap"></div>
+  </section>
+
+  <!-- ============================= 7. ANALYST THINKING ============================= -->
+  <section id="analyst" class="card" aria-labelledby="analyst-heading">
+    <h2 id="analyst-heading"><span class="step">7</span>How to Think Like an Analyst</h2>
+    <p class="section-intro">
+      The tool does the counting. You do the thinking. This is the workflow a defender follows after any alert,
+      in this tool or in a real SOC.
+    </p>
+    <ol class="analyst-steps">
+      <li><strong>Observe unusual behaviour.</strong> Something stands out: a host far busier than its peers, a
+        lot of connection attempts, a burst of name lookups.</li>
+      <li><strong>Identify the source and destination.</strong> Which device is responsible, and who is it
+        talking to? A name or asset owner turns an IP address into a story.</li>
+      <li><strong>Determine which protocol is involved.</strong> DNS, ICMP, SMB, TLS and HTTP all fail in
+        different ways. The protocol narrows down what the traffic could be.</li>
+      <li><strong>Establish whether the activity is expected.</strong> Is this host a backup server, a scanner,
+        a printer, a monitoring agent? Expected behaviour is not a finding.</li>
+      <li><strong>Look for supporting indicators.</strong> Volume alone is weak evidence. Volume plus timing
+        plus a strange destination plus a service that should not be reachable is stronger.</li>
+      <li><strong>Correlate with other security telemetry.</strong> Endpoint logs, authentication events,
+        firewall logs and change records answer questions packet headers cannot.</li>
+      <li><strong>Decide whether further investigation is required.</strong> Document the outcome either way.
+        "Expected backup traffic, confirmed with the asset owner" is a valid and valuable conclusion.</li>
+    </ol>
+    <p class="lesson">
+      An anomaly is a starting point for investigation, not proof of compromise.
+    </p>
+    <p class="lesson lesson-secondary">
+      Detection tells an analyst where to look. Investigation determines what actually happened.
+    </p>
+  </section>
+
+  <!-- ============================= 8. WIRESHARK ============================= -->
+  <section id="wireshark" class="card" aria-labelledby="wireshark-heading">
+    <h2 id="wireshark-heading"><span class="step">8</span>Capturing and exporting with Wireshark</h2>
+    <p class="callout callout-warn">
+      <strong>Only capture traffic from systems and networks you own or are authorised to monitor.</strong>
+      Capturing other people's traffic may be illegal where you live and can breach policies at work or school.
+      When in doubt, use the demo data in this tool instead.
+    </p>
+    <ol class="analyst-steps">
+      <li>Open Wireshark and select the network interface you are authorised to monitor.</li>
+      <li>Start the capture and generate the traffic you want to study (browse a page, ping a host, run an
+        authorised scan against your own lab).</li>
+      <li>Stop the capture.</li>
+      <li>Export the packet list: <strong>File &rarr; Export Packet Dissections &rarr; As CSV&hellip;</strong>,
+        then choose a destination file. Keep the capture short (a few minutes) so the numbers stay readable.</li>
+      <li>Upload that CSV here with <strong>Upload Wireshark CSV</strong>, or drag it onto the upload box.</li>
+    </ol>
+    <p class="hint">
+      Tip: a smaller capture tells a clearer story than a one-hour capture. Ten minutes of focused traffic is
+      usually enough for the rules in this tool to be meaningful.
+    </p>
+  </section>
+
+  <!-- ============================= 9. LIMITATIONS ============================= -->
+  <section id="limitations" class="card" aria-labelledby="limitations-heading">
+    <h2 id="limitations-heading"><span class="step">9</span>What this tool cannot tell you</h2>
+    <p class="section-intro">
+      Knowing the limits of a tool is part of using it competently. These are the honest boundaries of a
+      CSV-based triage helper.
+    </p>
+    <ul class="limitations-list">
+      <li><strong>A CSV holds less than a capture file.</strong> Wireshark can show flags, options, payloads,
+        response times and TLS details. The packet-list CSV export does not, so some questions simply cannot be
+        answered from this input.</li>
+      <li><strong>Encrypted traffic hides its contents.</strong> You can see that two hosts exchanged 1.4 KB
+        segments, but not whether it was a backup, a video, or something else.</li>
+      <li><strong>Packet volume is not a measure of badness.</strong> A nightly backup is 100,000 packets of
+        entirely good news.</li>
+      <li><strong>Thresholds vary enormously by environment.</strong> A domain controller, a build server and a
+        laptop all look wildly different while behaving normally.</li>
+      <li><strong>NAT and proxies blur host attribution.</strong> Hundreds of devices behind one public address
+        appear as a single very busy host.</li>
+      <li><strong>The whole capture is treated as one time window.</strong> A 10-minute and a 6-hour capture of
+        identical traffic produce very different counts, so thresholds are not comparable across captures of
+        different lengths.</li>
+      <li><strong>Protocol labels come from Wireshark.</strong> Values such as <code>TLSv1.2</code>,
+        <code>QUIC</code> or <code>SSDP</code> are mapped into simple families for readability, and anything
+        unrecognised is grouped under <em>Other</em>.</li>
+      <li><strong>Port and TCP-flag detection depends on the Info column.</strong> If your export does not
+        contain recognisable port or flag text, Rules 3 and 7 are reported as <em>not evaluated</em> rather than
+        guessed.</li>
+      <li><strong>This is not malware analysis.</strong> It never inspects payloads, hashes or files.</li>
+      <li><strong>It does not replace Wireshark, an IDS, a SIEM or professional network monitoring.</strong> It
+        is a teaching aid for the reasoning step of triage.</li>
+    </ul>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>
+      <strong>Educational network triage tool.</strong> Alerts indicate activity worth investigating and do not
+      prove malicious behaviour.
+    </p>
+    <p>
+      Only analyse traffic from systems and networks you own or are authorised to monitor. All analysis runs
+      locally in your browser; nothing is uploaded, stored remotely, or shared with any third party.
+    </p>
+    <p class="footer-meta">
+      Network Traffic Triage Tool &mdash; Version 1 (Wireshark CSV). No frameworks, no dependencies, no tracking.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>
+
+
+
+
+
